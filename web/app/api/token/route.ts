@@ -1,4 +1,4 @@
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,27 @@ export async function POST(req: NextRequest) {
 
   const roomName = room || `voice-ai-${Date.now()}`;
   const participantName = username || "user";
+  const httpUrl = livekitUrl.replace("wss://", "https://");
 
+  // Create room
+  const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret);
+  try {
+    await roomService.createRoom({ name: roomName });
+    console.log(`Room created: ${roomName}`);
+  } catch (e) {
+    console.log("Room create:", e instanceof Error ? e.message : e);
+  }
+
+  // Explicitly dispatch agent (empty agentName = any available agent)
+  try {
+    const dispatch = new AgentDispatchClient(httpUrl, apiKey, apiSecret);
+    await dispatch.createDispatch(roomName, "");
+    console.log(`Agent dispatched to: ${roomName}`);
+  } catch (e) {
+    console.error("Dispatch error:", e instanceof Error ? e.message : e);
+  }
+
+  // Generate participant token
   const at = new AccessToken(apiKey, apiSecret, {
     identity: participantName,
     name: participantName,
