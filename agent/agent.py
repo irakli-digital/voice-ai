@@ -15,13 +15,15 @@ from livekit.agents import (
     metrics,
 )
 from livekit.agents.voice import room_io
-from livekit.plugins import openai, silero, elevenlabs
+from livekit.plugins import openai, silero, elevenlabs, google
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from db import ConversationDB
 
 logger = logging.getLogger("voice-ai")
 load_dotenv(".env.local")
+
+GOOGLE_CREDENTIALS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "google-credentials.json")
 
 # VAD tuning — raise thresholds to reject background office noise
 VAD_ACTIVATION_THRESHOLD = float(os.environ.get("VAD_ACTIVATION_THRESHOLD", "0.65"))
@@ -76,14 +78,16 @@ async def entrypoint(ctx: JobContext):
     await db.init()
 
     session = AgentSession(
-        stt=elevenlabs.STT(
-            model="scribe_v2_realtime",
-            language="ka",
+        stt=google.STT(
+            languages="en-US",
+            model="latest_long",
+            credentials_file=GOOGLE_CREDENTIALS,
         ),
-        llm=openai.LLM(model="gpt-4o"),
-        tts=elevenlabs.TTS(
-            model="eleven_flash_v2_5",  # v3 doesn't support streaming yet
-            voice_id="fLfACebsZTJhQKpdyyeo",  # "Irakli test" cloned voice
+        llm=google.LLM(model="gemini-3-flash-preview"),
+        tts=google.TTS(
+            model_name="gemini-2.5-pro-preview-tts",
+            language="en-US",
+            credentials_file=GOOGLE_CREDENTIALS,
         ),
         vad=ctx.proc.userdata["vad"],
         turn_detection=MultilingualModel(),
@@ -134,7 +138,7 @@ async def entrypoint(ctx: JobContext):
     else:
         logger.info("Noise cancellation disabled (set NOISE_CANCELLATION_MODULE to enable)")
 
-    logger.info(f"Starting session '{session_id}' with stt=elevenlabs.scribe_v2_realtime")
+    logger.info(f"Starting session '{session_id}' with stt=elevenlabs, tts=google.chirp_3")
 
     await session.start(
         agent=VoiceAssistant(),

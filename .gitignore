@@ -11,3 +11,6 @@ web/.next/
 agent/.env.local
 web/.env.local
 .env
+
+# Google Cloud credentials
+agent/google-credentials.json

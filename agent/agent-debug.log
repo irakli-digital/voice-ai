@@ -1,0 +1,43 @@
+2026-02-18 17:51:20,453 INFO voice-ai [26150] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:20,453 INFO voice-ai [26151] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:20,454 INFO voice-ai [26152] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:20,454 DEBUG asyncio [26150] Using selector: KqueueSelector
+2026-02-18 17:51:20,454 DEBUG asyncio [26151] Using selector: KqueueSelector
+2026-02-18 17:51:20,454 DEBUG asyncio [26152] Using selector: KqueueSelector
+2026-02-18 17:51:20,456 INFO voice-ai [26149] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:20,456 DEBUG asyncio [26149] Using selector: KqueueSelector
+2026-02-18 17:51:21,892 INFO voice-ai [26162] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:21,892 DEBUG asyncio [26162] Using selector: KqueueSelector
+2026-02-18 17:51:21,892 INFO voice-ai [26160] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:21,893 DEBUG asyncio [26160] Using selector: KqueueSelector
+2026-02-18 17:51:21,894 INFO voice-ai [26161] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:21,894 DEBUG asyncio [26161] Using selector: KqueueSelector
+2026-02-18 17:51:21,895 INFO voice-ai [26159] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:21,895 DEBUG asyncio [26159] Using selector: KqueueSelector
+2026-02-18 17:51:23,428 INFO voice-ai [26164] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:23,428 INFO voice-ai [26166] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:23,428 DEBUG asyncio [26164] Using selector: KqueueSelector
+2026-02-18 17:51:23,428 DEBUG asyncio [26166] Using selector: KqueueSelector
+2026-02-18 17:51:23,429 INFO voice-ai [26165] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:23,429 INFO voice-ai [26167] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:23,429 DEBUG asyncio [26165] Using selector: KqueueSelector
+2026-02-18 17:51:23,429 DEBUG asyncio [26167] Using selector: KqueueSelector
+2026-02-18 17:51:24,817 INFO voice-ai [26169] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:24,818 DEBUG asyncio [26169] Using selector: KqueueSelector
+2026-02-18 17:51:24,819 INFO voice-ai [26170] VAD loaded: threshold=0.65, min_speech=0.2s, min_silence=0.6s
+2026-02-18 17:51:24,819 DEBUG asyncio [26170] Using selector: KqueueSelector
+2026-02-18 17:52:07,017 INFO livekit.agents [26093] closing agent session due to participant disconnect (disable via `RoomInputOptions.close_on_disconnect=False`)
+2026-02-18 17:52:29,074 DEBUG livekit.agents [26093] shutting down job task
+2026-02-18 17:52:29,076 DEBUG livekit.agents [26093] http_session(): closing the httpclient ctx
+2026-02-18 17:52:29,076 DEBUG livekit.agents [26093] http_session(): creating a new httpclient ctx
+2026-02-18 17:52:29,329 WARNING livekit.agents [26093] non-daemon thread `Thread-1 (_connection_worker_thread)` may prevent the process from exiting
+2026-02-18 17:52:29,331 WARNING livekit.agents [26093] stack for `Thread-1 (_connection_worker_thread)`:
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043, in _bootstrap
+    self._bootstrap_inner()
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/iraklichkheidze/Library/CloudStorage/Dropbox/AI Projects/Voice AI/voice-ai/agent/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 59, in _connection_worker_thread
+    future, function = tx.get()
+
