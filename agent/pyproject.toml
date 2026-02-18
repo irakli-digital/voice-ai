@@ -1,0 +1,11 @@
+[project]
+name = "voice-ai-agent"
+version = "0.1.0"
+description = "Georgian Voice AI — LiveKit Agent"
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "livekit-agents[openai,silero,elevenlabs,turn-detector]~=1.4",
+    "python-dotenv",
+    "aiosqlite",
+    "aiohttp",
+]
