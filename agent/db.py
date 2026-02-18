@@ -1,77 +1,81 @@
-"""SQLite conversation logging for Voice AI sessions."""
+"""Postgres conversation logging for Voice AI sessions."""
 
 import os
 import time
 import logging
-import aiosqlite
+
+import asyncpg
 
 logger = logging.getLogger("voice-ai-db")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "conversations.db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
 class ConversationDB:
-    def __init__(self, db_path: str = DB_PATH):
-        self._db_path = db_path
-        self._db: aiosqlite.Connection | None = None
+    def __init__(self):
+        self._pool: asyncpg.Pool | None = None
 
     async def init(self):
-        self._db = await aiosqlite.connect(self._db_path)
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                started_at REAL NOT NULL,
-                ended_at REAL,
-                metadata TEXT
-            )
-        """)
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                text TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                latency_ms REAL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-        """)
-        await self._db.commit()
-        logger.info(f"Database initialized at {self._db_path}")
+        if not DATABASE_URL:
+            logger.warning("DATABASE_URL not set — conversation logging disabled")
+            return
+        self._pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    started_at DOUBLE PRECISION NOT NULL,
+                    ended_at DOUBLE PRECISION,
+                    metadata TEXT
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    latency_ms DOUBLE PRECISION
+                )
+            """)
+        logger.info("Database initialized (Postgres)")
 
     async def start_session(self, session_id: str, metadata: str = ""):
-        if not self._db:
+        if not self._pool:
             return
-        await self._db.execute(
-            "INSERT OR IGNORE INTO sessions (session_id, started_at, metadata) VALUES (?, ?, ?)",
-            (session_id, time.time(), metadata),
-        )
-        await self._db.commit()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO sessions (session_id, started_at, metadata)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (session_id) DO NOTHING""",
+                session_id, time.time(), metadata,
+            )
 
     async def end_session(self, session_id: str):
-        if not self._db:
+        if not self._pool:
             return
-        await self._db.execute(
-            "UPDATE sessions SET ended_at = ? WHERE session_id = ?",
-            (time.time(), session_id),
-        )
-        await self._db.commit()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sessions SET ended_at = $1 WHERE session_id = $2",
+                time.time(), session_id,
+            )
 
     async def log_message(
         self, session_id: str, role: str, text: str, latency_ms: float | None = None
     ):
-        if not self._db:
+        if not self._pool:
             return
-        # Ensure session exists
         await self.start_session(session_id)
-        await self._db.execute(
-            "INSERT INTO messages (session_id, role, text, created_at, latency_ms) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, text, time.time(), latency_ms),
-        )
-        await self._db.commit()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO messages (session_id, role, text, created_at, latency_ms)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                session_id, role, text, time.time(), latency_ms,
+            )
         logger.debug(f"[{session_id}] {role}: {text[:80]}...")
 
     async def close(self):
-        if self._db:
-            await self._db.close()
-            self._db = None
+        if self._pool:
+            await self._pool.close()
+            self._pool = None

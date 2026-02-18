@@ -1,0 +1,9 @@
+agent/.venv/
+agent/__pycache__/
+agent/*.db
+agent/.env.local
+agent/google-credentials.json
+web/node_modules/
+web/.next/
+web/.env.local
+.git/

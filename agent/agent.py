@@ -21,9 +21,12 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from db import ConversationDB
 
 logger = logging.getLogger("voice-ai")
-load_dotenv(".env.local")
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env.local"))
 
-GOOGLE_CREDENTIALS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "google-credentials.json")
+GOOGLE_CREDENTIALS = os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "google-credentials.json"),
+)
 
 # VAD tuning — raise thresholds to reject background office noise
 VAD_ACTIVATION_THRESHOLD = float(os.environ.get("VAD_ACTIVATION_THRESHOLD", "0.65"))
@@ -98,7 +101,7 @@ async def entrypoint(ctx: JobContext):
         metrics.log_metrics(ev.metrics)
         usage_collector.collect(ev.metrics)
 
-    # Log conversation turns to SQLite
+    # Log conversation turns to Postgres
     session_id = ctx.room.name or "console"
 
     @session.on("user_input_transcribed")

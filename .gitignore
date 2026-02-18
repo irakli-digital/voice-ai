@@ -8,8 +8,7 @@ web/node_modules/
 web/.next/
 
 # Environment files with secrets
-agent/.env.local
-web/.env.local
+.env.local
 .env
 
 # Google Cloud credentials

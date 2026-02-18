@@ -6,6 +6,6 @@ requires-python = ">=3.10,<3.15"
 dependencies = [
     "livekit-agents[openai,silero,elevenlabs,google,turn-detector]~=1.4",
     "python-dotenv",
-    "aiosqlite",
+    "asyncpg",
     "aiohttp",
 ]
