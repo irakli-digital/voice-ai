@@ -78,10 +78,9 @@ async def entrypoint(ctx: JobContext):
     await db.init()
 
     session = AgentSession(
-        stt=google.STT(
-            languages="en-US",
-            model="latest_long",
-            credentials_file=GOOGLE_CREDENTIALS,
+        stt=elevenlabs.STT(
+            model_id="scribe_v2_realtime",
+            language_code="ka",
         ),
         llm=google.LLM(model="gemini-3-flash-preview"),
         tts=google.TTS(
