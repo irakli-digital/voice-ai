@@ -9,6 +9,9 @@ RUN npm run build
 # ---- Stage 2: Final image (Python + Node runtime) ----
 FROM python:3.12-slim
 
+# System deps (libgomp1 needed by ONNX Runtime / Silero VAD)
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
 # Node.js runtime for Next.js standalone server
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 

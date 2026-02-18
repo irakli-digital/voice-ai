@@ -7,9 +7,10 @@ if [ -n "$GOOGLE_CREDENTIALS_JSON" ]; then
   export GOOGLE_APPLICATION_CREDENTIALS=/app/agent/google-credentials.json
 fi
 
-# Next.js web server (background)
+# Next.js web server (background) — uses $PORT from Railway
 node /app/web/server.js &
 
-# Python voice agent (foreground — container lives/dies with this)
+# Python voice agent (foreground) — override PORT to avoid conflict
 cd /app/agent
+export PORT=8081
 exec uv run agent.py start
