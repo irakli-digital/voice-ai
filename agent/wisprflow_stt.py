@@ -12,11 +12,10 @@ Both require 16kHz 16-bit mono PCM WAV input (LiveKit sends 48kHz).
 import os
 import io
 import wave
-import struct
 import base64
 import logging
 import asyncio
-import json
+import time
 from typing import AsyncIterable, Optional
 
 import aiohttp
@@ -27,16 +26,6 @@ logger = logging.getLogger("wisprflow-stt")
 
 WISPRFLOW_REST_URL = "https://platform-api.wisprflow.ai/api/v1/dash/api"
 WISPRFLOW_WS_URL = "wss://platform-api.wisprflow.ai/api/v1/dash/ws"
-
-
-def resample_48k_to_16k(pcm_data: bytes) -> bytes:
-    """Resample 16-bit mono PCM from 48kHz to 16kHz by taking every 3rd sample."""
-    # Each sample is 2 bytes (16-bit)
-    sample_count = len(pcm_data) // 2
-    samples = struct.unpack(f"<{sample_count}h", pcm_data)
-    # Simple decimation: take every 3rd sample (48000/16000 = 3)
-    resampled = samples[::3]
-    return struct.pack(f"<{len(resampled)}h", *resampled)
 
 
 def pcm_to_wav_base64(pcm_data: bytes, sample_rate: int = 16000) -> str:
@@ -50,13 +39,13 @@ def pcm_to_wav_base64(pcm_data: bytes, sample_rate: int = 16000) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-async def transcribe_with_wisprflow(audio_data: bytes, sample_rate: int = 48000) -> Optional[str]:
+async def transcribe_with_wisprflow(audio_data: bytes, sample_rate: int = 16000) -> Optional[str]:
     """
     Send audio to WisprFlow REST API and return transcription.
 
     Args:
-        audio_data: Raw 16-bit mono PCM bytes
-        sample_rate: Input sample rate (will be resampled to 16kHz if needed)
+        audio_data: Raw 16-bit mono PCM bytes (must already be 16kHz)
+        sample_rate: Sample rate of audio_data (should be 16000)
 
     Returns:
         Transcribed text or None on failure
@@ -66,16 +55,14 @@ async def transcribe_with_wisprflow(audio_data: bytes, sample_rate: int = 48000)
         logger.error("WISPRFLOW_API_KEY not set")
         return None
 
-    # Resample to 16kHz if needed
-    if sample_rate == 48000:
-        pcm_16k = resample_48k_to_16k(audio_data)
-    elif sample_rate == 16000:
-        pcm_16k = audio_data
-    else:
-        logger.error(f"Unsupported sample rate: {sample_rate}")
-        return None
+    duration_s = len(audio_data) / (sample_rate * 2)  # 16-bit = 2 bytes/sample
+    logger.info(
+        f"WisprFlow API call: {len(audio_data)} bytes, "
+        f"{duration_s:.2f}s audio, rate={sample_rate}, "
+        f"key={api_key[:8]}..."
+    )
 
-    wav_b64 = pcm_to_wav_base64(pcm_16k, 16000)
+    wav_b64 = pcm_to_wav_base64(audio_data, sample_rate)
 
     payload = {
         "audio": wav_b64,
@@ -95,9 +82,10 @@ async def transcribe_with_wisprflow(audio_data: bytes, sample_rate: int = 48000)
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    logger.debug(f"WisprFlow raw response: {data}")
                     text = data.get("text", "").strip()
                     total_time = data.get("total_time", 0)
-                    logger.info(f"WisprFlow transcription ({total_time}ms): {text}")
+                    logger.info(f"WisprFlow transcription ({total_time}ms): {text!r}")
                     return text if text else None
                 else:
                     body = await resp.text()
@@ -125,6 +113,7 @@ class WisprFlowSTTNode:
 
     def __init__(self):
         self._api_key = os.environ.get("WISPRFLOW_API_KEY", "")
+        self._resampler: Optional[rtc.AudioResampler] = None
 
     async def process(
         self,
@@ -132,38 +121,88 @@ class WisprFlowSTTNode:
         model_settings: ModelSettings,
     ) -> AsyncIterable[stt.SpeechEvent]:
         """
-        Process audio frames and yield SpeechEvents with WisprFlow transcriptions.
+        Process audio frames in 5-second chunks and yield SpeechEvents.
 
-        LiveKit's VAD already segments speech — by the time frames arrive here,
-        they represent a complete utterance. We accumulate all frames, resample,
-        and send to the REST API.
+        The audio stream is continuous (never ends on its own).
+        We collect CHUNK_SECONDS of audio, send to WisprFlow REST API,
+        yield the result, then repeat.
         """
+        CHUNK_SECONDS = 5
         pcm_buffer = bytearray()
-        input_sample_rate = 48000
+        chunk_start = time.monotonic()
+        total_frames = 0
 
         async for frame in audio:
-            input_sample_rate = frame.sample_rate
-            pcm_buffer.extend(frame.data)
-
-        if not pcm_buffer:
-            return
-
-        text = await transcribe_with_wisprflow(
-            bytes(pcm_buffer), sample_rate=input_sample_rate
-        )
-
-        if text:
-            yield stt.SpeechEvent(
-                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                alternatives=[
-                    stt.SpeechData(
-                        text=text,
-                        language="ka",
+            # Setup resampler on first frame
+            if total_frames == 0:
+                logger.info(
+                    f"First audio frame: sample_rate={frame.sample_rate}, "
+                    f"num_channels={frame.num_channels}, "
+                    f"data type={type(frame.data).__name__}, "
+                    f"data len={len(frame.data)}"
+                )
+                if frame.sample_rate != 16000:
+                    self._resampler = rtc.AudioResampler(
+                        input_rate=frame.sample_rate,
+                        output_rate=16000,
+                        num_channels=frame.num_channels,
                     )
-                ],
+                    logger.info(
+                        f"Created AudioResampler: {frame.sample_rate}Hz -> 16000Hz"
+                    )
+                else:
+                    self._resampler = None
+
+            # Resample and buffer
+            if self._resampler:
+                for rf in self._resampler.push(frame):
+                    pcm_buffer.extend(rf.data.tobytes())
+            else:
+                pcm_buffer.extend(frame.data.tobytes())
+
+            total_frames += 1
+
+            # Every CHUNK_SECONDS, process the buffered audio
+            elapsed = time.monotonic() - chunk_start
+            if elapsed >= CHUNK_SECONDS and len(pcm_buffer) > 0:
+                buf_bytes = len(pcm_buffer)
+                logger.info(
+                    f"Chunk ready: {buf_bytes} bytes, "
+                    f"{elapsed:.1f}s, sending to WisprFlow"
+                )
+
+                text = await transcribe_with_wisprflow(
+                    bytes(pcm_buffer), sample_rate=16000
+                )
+
+                if text:
+                    logger.info(f"Transcribed: {text!r}")
+                    yield stt.SpeechEvent(
+                        type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                        alternatives=[
+                            stt.SpeechData(text=text, language="ka")
+                        ],
+                    )
+                else:
+                    logger.info(f"No speech in chunk ({buf_bytes} bytes)")
+
+                # Reset for next chunk
+                pcm_buffer = bytearray()
+                chunk_start = time.monotonic()
+
+        # Process any remaining audio
+        if pcm_buffer:
+            logger.info(f"Final chunk: {len(pcm_buffer)} bytes")
+            text = await transcribe_with_wisprflow(
+                bytes(pcm_buffer), sample_rate=16000
             )
-        else:
-            logger.warning("WisprFlow returned empty transcription")
+            if text:
+                yield stt.SpeechEvent(
+                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                    alternatives=[
+                        stt.SpeechData(text=text, language="ka")
+                    ],
+                )
 
 
 class WisprFlowWebSocketSTT:
@@ -176,6 +215,7 @@ class WisprFlowWebSocketSTT:
 
     def __init__(self):
         self._api_key = os.environ.get("WISPRFLOW_API_KEY", "")
+        self._resampler: Optional[rtc.AudioResampler] = None
 
     async def process(
         self,
@@ -207,17 +247,24 @@ class WisprFlowWebSocketSTT:
                         return
 
                     packet_count = 0
-                    input_sample_rate = 48000
+                    resampler: Optional[rtc.AudioResampler] = None
 
                     async for frame in audio:
-                        input_sample_rate = frame.sample_rate
-                        pcm_data = bytes(frame.data)
+                        # Create resampler on first frame if needed
+                        if packet_count == 0 and frame.sample_rate != 16000:
+                            resampler = rtc.AudioResampler(
+                                input_rate=frame.sample_rate,
+                                output_rate=16000,
+                                num_channels=frame.num_channels,
+                            )
 
                         # Resample to 16kHz
-                        if input_sample_rate == 48000:
-                            pcm_16k = resample_48k_to_16k(pcm_data)
+                        if resampler:
+                            resampled_frames = resampler.push(frame)
+                            pcm_chunks = [rf.data.tobytes() for rf in resampled_frames]
+                            pcm_16k = b"".join(pcm_chunks)
                         else:
-                            pcm_16k = pcm_data
+                            pcm_16k = frame.data.tobytes()
 
                         wav_b64 = pcm_to_wav_base64(pcm_16k, 16000)
                         duration = len(pcm_16k) / (16000 * 2)  # seconds

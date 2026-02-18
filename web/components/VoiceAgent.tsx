@@ -4,10 +4,13 @@ import { useCallback, useState, useRef, useEffect } from "react";
 import {
   LiveKitRoom,
   useVoiceAssistant,
+  useTrackTranscription,
+  useLocalParticipant,
   BarVisualizer,
   RoomAudioRenderer,
   DisconnectButton,
 } from "@livekit/components-react";
+import { Track } from "livekit-client";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
@@ -20,8 +23,91 @@ interface TranscriptEntry {
 
 function VoiceUI() {
   const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
+  const { localParticipant } = useLocalParticipant();
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micActive, setMicActive] = useState(false);
+
+  // Get user's microphone track for transcription
+  const localMicPublication = localParticipant.getTrackPublication(
+    Track.Source.Microphone
+  );
+
+  // Mic level meter via Web Audio API
+  useEffect(() => {
+    const track = localMicPublication?.track;
+    if (!track) {
+      setMicActive(false);
+      return;
+    }
+    const mediaStream = track.mediaStream;
+    if (!mediaStream) {
+      setMicActive(false);
+      return;
+    }
+
+    setMicActive(true);
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(mediaStream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let raf: number;
+
+    const poll = () => {
+      analyser.getByteFrequencyData(dataArray);
+      // RMS-ish level normalized to 0-1
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const avg = sum / dataArray.length / 255;
+      setMicLevel(avg);
+      raf = requestAnimationFrame(poll);
+    };
+    poll();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      source.disconnect();
+      audioCtx.close();
+    };
+  }, [localMicPublication?.track]);
+  const userTranscriptions = useTrackTranscription({
+    participant: localParticipant,
+    source: Track.Source.Microphone,
+    publication: localMicPublication,
+  });
+
+  // Track user transcriptions
+  useEffect(() => {
+    if (!userTranscriptions.segments || userTranscriptions.segments.length === 0)
+      return;
+
+    setTranscript((prev) => {
+      const updated = [...prev];
+      for (const seg of userTranscriptions.segments) {
+        const id = `user-${seg.id}`;
+        const existing = updated.findIndex((e) => e.id === id);
+        if (existing >= 0) {
+          updated[existing] = {
+            ...updated[existing],
+            text: seg.text,
+            isFinal: seg.final,
+          };
+        } else {
+          updated.push({
+            id,
+            role: "user",
+            text: seg.text,
+            isFinal: seg.final,
+          });
+        }
+      }
+      return updated;
+    });
+  }, [userTranscriptions.segments]);
 
   // Track agent transcriptions
   useEffect(() => {
@@ -218,6 +304,42 @@ function VoiceUI() {
       >
         გათიშვა
       </DisconnectButton>
+
+      {/* Mic Level Meter */}
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "0.3rem",
+        }}
+      >
+        <span style={{ fontSize: "0.7rem", color: "#888" }}>
+          {micActive
+            ? `MIC ${Math.round(micLevel * 100)}%`
+            : "MIC: no signal"}
+        </span>
+        <div
+          style={{
+            width: "80%",
+            height: "6px",
+            backgroundColor: "#222",
+            borderRadius: "3px",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${Math.min(micLevel * 100 * 3, 100)}%`,
+              backgroundColor: micLevel > 0.05 ? "#22c55e" : "#555",
+              borderRadius: "3px",
+              transition: "width 0.05s, background-color 0.2s",
+            }}
+          />
+        </div>
+      </div>
 
       {/* Chat Transcript */}
       <div

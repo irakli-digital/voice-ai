@@ -1,8 +1,6 @@
 import os
 import logging
 import asyncio
-import time
-from typing import AsyncIterable, Optional
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -13,22 +11,22 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     MetricsCollectedEvent,
-    ModelSettings,
     cli,
     metrics,
-    stt,
 )
+from livekit.agents.voice import room_io
 from livekit.plugins import openai, silero, elevenlabs
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-from wisprflow_stt import WisprFlowSTTNode
 from db import ConversationDB
 
 logger = logging.getLogger("voice-ai")
 load_dotenv(".env.local")
 
-# Toggle STT provider: "wisprflow" or "openai"
-STT_PROVIDER = os.environ.get("STT_PROVIDER", "openai")
+# VAD tuning — raise thresholds to reject background office noise
+VAD_ACTIVATION_THRESHOLD = float(os.environ.get("VAD_ACTIVATION_THRESHOLD", "0.65"))
+VAD_MIN_SPEECH_DURATION = float(os.environ.get("VAD_MIN_SPEECH_DURATION", "0.2"))
+VAD_MIN_SILENCE_DURATION = float(os.environ.get("VAD_MIN_SILENCE_DURATION", "0.6"))
 
 SYSTEM_PROMPT = """\
 შენ ხარ მეგობრული და დამხმარე ხელოვნური ინტელექტის ასისტენტი, რომელიც ქართულად საუბრობს.
@@ -45,34 +43,12 @@ SYSTEM_PROMPT = """\
 class VoiceAssistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_PROMPT)
-        self._wisprflow_node = WisprFlowSTTNode() if STT_PROVIDER == "wisprflow" else None
 
     async def on_enter(self):
         self.session.generate_reply(
             instructions="მოიკითხე მომხმარებელი ქართულად და შესთავაზე შენი დახმარება. იყავი მოკლე.",
             allow_interruptions=False,
         )
-
-    async def stt_node(
-        self,
-        audio: AsyncIterable[rtc.AudioFrame],
-        model_settings: ModelSettings,
-    ) -> Optional[AsyncIterable[stt.SpeechEvent]]:
-        if self._wisprflow_node:
-            logger.info("Using WisprFlow STT")
-            t0 = time.monotonic()
-
-            async def timed_wisprflow():
-                async for event in self._wisprflow_node.process(audio, model_settings):
-                    elapsed = (time.monotonic() - t0) * 1000
-                    logger.info(f"STT (WisprFlow) completed in {elapsed:.0f}ms")
-                    yield event
-
-            return timed_wisprflow()
-
-        # Fallback: use default STT (OpenAI Whisper configured in AgentSession)
-        logger.info("Using OpenAI Whisper STT")
-        return Agent.default.stt_node(self, audio, model_settings)
 
 
 db = ConversationDB()
@@ -81,7 +57,15 @@ usage_collector = metrics.UsageCollector()
 
 
 def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        activation_threshold=VAD_ACTIVATION_THRESHOLD,
+        min_speech_duration=VAD_MIN_SPEECH_DURATION,
+        min_silence_duration=VAD_MIN_SILENCE_DURATION,
+    )
+    logger.info(
+        f"VAD loaded: threshold={VAD_ACTIVATION_THRESHOLD}, "
+        f"min_speech={VAD_MIN_SPEECH_DURATION}s, min_silence={VAD_MIN_SILENCE_DURATION}s"
+    )
 
 
 server.setup_fnc = prewarm
@@ -92,10 +76,15 @@ async def entrypoint(ctx: JobContext):
     await db.init()
 
     session = AgentSession(
-        # OpenAI Whisper as fallback STT (used when STT_PROVIDER != "wisprflow")
-        stt=openai.STT(model="whisper-1", language="ka"),
+        stt=elevenlabs.STT(
+            model="scribe_v2_realtime",
+            language="ka",
+        ),
         llm=openai.LLM(model="gpt-4o"),
-        tts=elevenlabs.TTS(model="eleven_multilingual_v2"),
+        tts=elevenlabs.TTS(
+            model="eleven_flash_v2_5",  # v3 doesn't support streaming yet
+            voice_id="fLfACebsZTJhQKpdyyeo",  # "Irakli test" cloned voice
+        ),
         vad=ctx.proc.userdata["vad"],
         turn_detection=MultilingualModel(),
     )
@@ -131,11 +120,26 @@ async def entrypoint(ctx: JobContext):
                     db.log_message(session_id, "assistant", text)
                 )
 
-    logger.info(f"Starting session '{session_id}' with STT_PROVIDER={STT_PROVIDER}")
+    # Enable noise cancellation if a module is configured (requires livekit noise cancellation plugin)
+    noise_cancellation_module = os.environ.get("NOISE_CANCELLATION_MODULE")
+    room_input_opts = None
+    if noise_cancellation_module:
+        room_input_opts = room_io.RoomInputOptions(
+            noise_cancellation=rtc.NoiseCancellationOptions(
+                module_id=noise_cancellation_module,
+                options="",
+            ),
+        )
+        logger.info(f"Noise cancellation enabled: module={noise_cancellation_module}")
+    else:
+        logger.info("Noise cancellation disabled (set NOISE_CANCELLATION_MODULE to enable)")
+
+    logger.info(f"Starting session '{session_id}' with stt=elevenlabs.scribe_v2_realtime")
 
     await session.start(
         agent=VoiceAssistant(),
         room=ctx.room,
+        **({"room_input_options": room_input_opts} if room_input_opts else {}),
     )
 
 

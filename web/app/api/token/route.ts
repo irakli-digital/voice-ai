@@ -1,4 +1,4 @@
-import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -28,14 +28,7 @@ export async function POST(req: NextRequest) {
     console.log("Room create:", e instanceof Error ? e.message : e);
   }
 
-  // Explicitly dispatch agent (empty agentName = any available agent)
-  try {
-    const dispatch = new AgentDispatchClient(httpUrl, apiKey, apiSecret);
-    await dispatch.createDispatch(roomName, "");
-    console.log(`Agent dispatched to: ${roomName}`);
-  } catch (e) {
-    console.error("Dispatch error:", e instanceof Error ? e.message : e);
-  }
+  // Agent auto-dispatches via @server.rtc_session() when participant joins
 
   // Generate participant token
   const at = new AccessToken(apiKey, apiSecret, {
