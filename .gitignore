@@ -9,6 +9,7 @@ web/.next/
 
 # Environment files with secrets
 .env.local
+web/.env.local
 .env
 
 # Google Cloud credentials

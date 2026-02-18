@@ -75,7 +75,7 @@ async def transcribe_with_wisprflow(audio_data: bytes, sample_rate: int = 16000)
                 WISPRFLOW_REST_URL,
                 json=payload,
                 headers={
-                    "Authorization": f"Bearer {api_key}",
+                    "Authorization": api_key,  # Raw API key (not Bearer prefix)
                     "Content-Type": "application/json",
                 },
                 timeout=aiohttp.ClientTimeout(total=10),
@@ -227,7 +227,8 @@ class WisprFlowWebSocketSTT:
             logger.error("WISPRFLOW_API_KEY not set")
             return
 
-        ws_url = f"{WISPRFLOW_WS_URL}?api_key=Bearer%20{api_key}"
+        # WisprFlow expects raw API key in query string (not Bearer prefix)
+        ws_url = f"{WISPRFLOW_WS_URL}?api_key={api_key}"
 
         try:
             async with aiohttp.ClientSession() as session:

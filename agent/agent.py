@@ -19,6 +19,7 @@ from livekit.plugins import openai, silero, elevenlabs, google
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from db import ConversationDB
+from wisprflow_stt import WisprFlowWebSocketSTT
 
 logger = logging.getLogger("voice-ai")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env.local"))
@@ -28,8 +29,8 @@ GOOGLE_CREDENTIALS = os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "google-credentials.json"),
 )
 
-# VAD tuning — raise thresholds to reject background office noise
-VAD_ACTIVATION_THRESHOLD = float(os.environ.get("VAD_ACTIVATION_THRESHOLD", "0.65"))
+# VAD tuning — lower threshold to detect user's speech more reliably
+VAD_ACTIVATION_THRESHOLD = float(os.environ.get("VAD_ACTIVATION_THRESHOLD", "0.4"))
 VAD_MIN_SPEECH_DURATION = float(os.environ.get("VAD_MIN_SPEECH_DURATION", "0.2"))
 VAD_MIN_SILENCE_DURATION = float(os.environ.get("VAD_MIN_SILENCE_DURATION", "0.6"))
 
@@ -45,15 +46,50 @@ SYSTEM_PROMPT = """\
 """
 
 
+STT_PROVIDER = os.environ.get("STT_PROVIDER", "elevenlabs")
+
+
+def get_stt_provider():
+    """Create the STT provider based on STT_PROVIDER env var."""
+    if STT_PROVIDER == "wisprflow":
+        # WisprFlow doesn't have a native LiveKit plugin, use ElevenLabs as fallback
+        # The custom WisprFlow integration is handled in VoiceAssistant.stt_node
+        logger.info("Using custom WisprFlow STT (via stt_node override)")
+        return elevenlabs.STT(
+            model_id="scribe_v2_realtime",
+            language_code="ka",
+        )
+    elif STT_PROVIDER == "openai":
+        return openai.STT(model="whisper-1")
+    else:
+        # Default: ElevenLabs Scribe v2
+        return elevenlabs.STT(
+            model_id="scribe_v2_realtime",
+            language_code="ka",
+        )
+
+
 class VoiceAssistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_PROMPT)
+        if STT_PROVIDER == "wisprflow":
+            self._wisprflow = WisprFlowWebSocketSTT()
+        else:
+            self._wisprflow = None
 
     async def on_enter(self):
         self.session.generate_reply(
             instructions="მოიკითხე მომხმარებელი ქართულად და შესთავაზე შენი დახმარება. იყავი მოკლე.",
             allow_interruptions=False,
         )
+
+    async def stt_node(self, audio, model_settings):
+        if self._wisprflow:
+            async for event in self._wisprflow.process(audio, model_settings):
+                yield event
+        else:
+            async for event in Agent.stt_node(self, audio, model_settings):
+                yield event
 
 
 db = ConversationDB()
@@ -81,14 +117,11 @@ async def entrypoint(ctx: JobContext):
     await db.init()
 
     session = AgentSession(
-        stt=elevenlabs.STT(
-            model_id="scribe_v2_realtime",
-            language_code="ka",
-        ),
+        stt=get_stt_provider(),
         llm=google.LLM(model="gemini-3-flash-preview"),
         tts=google.TTS(
             model_name="gemini-2.5-pro-preview-tts",
-            language="en-US",
+            language="en-US",  # English - user's preference
             credentials_file=GOOGLE_CREDENTIALS,
         ),
         vad=ctx.proc.userdata["vad"],
@@ -140,7 +173,7 @@ async def entrypoint(ctx: JobContext):
     else:
         logger.info("Noise cancellation disabled (set NOISE_CANCELLATION_MODULE to enable)")
 
-    logger.info(f"Starting session '{session_id}' with stt=elevenlabs, tts=google.chirp_3")
+    logger.info(f"Starting session '{session_id}' with stt={STT_PROVIDER}, tts=google")
 
     await session.start(
         agent=VoiceAssistant(),

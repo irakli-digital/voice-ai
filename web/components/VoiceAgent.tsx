@@ -23,7 +23,7 @@ interface TranscriptEntry {
 
 function VoiceUI() {
   const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
-  const { localParticipant } = useLocalParticipant();
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const [micLevel, setMicLevel] = useState(0);
@@ -36,8 +36,10 @@ function VoiceUI() {
 
   // Mic level meter via Web Audio API
   useEffect(() => {
+    console.log("Mic check:", { isMicrophoneEnabled, localMicPublication: !!localMicPublication?.track });
+    
     const track = localMicPublication?.track;
-    if (!track) {
+    if (!track || !isMicrophoneEnabled) {
       setMicActive(false);
       return;
     }
@@ -73,7 +75,7 @@ function VoiceUI() {
       source.disconnect();
       audioCtx.close();
     };
-  }, [localMicPublication?.track]);
+  }, [localMicPublication?.track, isMicrophoneEnabled]);
   const userTranscriptions = useTrackTranscription({
     participant: localParticipant,
     source: Track.Source.Microphone,
@@ -315,10 +317,12 @@ function VoiceUI() {
           gap: "0.3rem",
         }}
       >
-        <span style={{ fontSize: "0.7rem", color: "#888" }}>
+        <span style={{ fontSize: "0.7rem", color: isMicrophoneEnabled ? "#22c55e" : "#ef4444" }}>
           {micActive
             ? `MIC ${Math.round(micLevel * 100)}%`
-            : "MIC: no signal"}
+            : isMicrophoneEnabled
+              ? "MIC: detecting..."
+              : "MIC: not enabled"}
         </span>
         <div
           style={{
